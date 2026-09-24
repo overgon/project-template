@@ -54,8 +54,8 @@ print(f'This may take a while (~{sum(len(v["candles"]) for v in candles.values()
 result = backtest(config=config, routes=routes, data_routes=data_routes, candles=candles)
 
 print(f'\n✅ Full backtest completed!')
-print(f'  Total PnL: ${result["metrics"]["total"]:+.2f}')
-print(f'  Win rate: {result["metrics"]["win_rate"]:.1f}%')
+print(f'  Total PnL: ${result["metrics"]["net_profit"]:+.2f}')
+print(f'  Win rate: {result["metrics"]["win_rate"] * 100:.1f}%')
 print(f'  Net profit %: {result["metrics"]["net_profit_percentage"]:.2f}%')
 print(f'  Total trades: {len(result.get("trades", []))}')
 
@@ -73,7 +73,7 @@ for coin in COINS:
     symbol = f'{coin}-USDT'
     ts = by_coin.get(symbol, [])
     if ts:
-        wins = sum(1 for t in ts if t.get('executed_exit_price', 0) > t.get('entry_price', 0))
+        wins = sum(1 for t in ts if t.get('PNL', 0) > 0)
         total = len(ts)
         print(f'    {coin:6s}: N={total:3d}  WR={wins/total*100:5.1f}%')
     else:
