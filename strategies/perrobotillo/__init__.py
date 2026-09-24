@@ -302,10 +302,8 @@ class perrobotillo(Strategy):
         """
         Proxy for Perrobotillo's ML validator confidence score.
         Combines technical indicators to produce a 0-100 confidence.
+        Uses hyperparameters for RSI/ADX thresholds (optimized by Optuna).
         """
-        cfg = self.per_coin_config
-        ml_min = cfg.get('ml_min', 40)
-
         score = 50.0  # base
 
         # EMA alignment (strong filter)
@@ -314,13 +312,15 @@ class perrobotillo(Strategy):
         else:
             score -= 15
 
-        # RSI in healthy range
+        # RSI in healthy range (thresholds from hyperparameters)
         rsi_val = self.rsi()
-        if 45 < rsi_val < 75:
+        rsi_overbought = self.hp.get('rsi_overbought', 75)
+        rsi_oversold = self.hp.get('rsi_oversold', 30)
+        if rsi_oversold < rsi_val < rsi_overbought:
             score += 10
-        elif rsi_val > 75:
+        elif rsi_val > rsi_overbought:
             score -= 20
-        elif rsi_val < 30:
+        elif rsi_val < rsi_oversold:
             score -= 10
 
         # Volume confirmation
@@ -330,9 +330,10 @@ class perrobotillo(Strategy):
         else:
             score -= 5
 
-        # ADX trend strength
+        # ADX trend strength (threshold from hyperparameters)
         adx_val = self.adx
-        if adx_val > 25:
+        min_adx = self.hp.get('min_adx', 20)
+        if adx_val > min_adx:
             score += 8
         else:
             score -= 3
@@ -368,12 +369,11 @@ class perrobotillo(Strategy):
     def filter_ml_proxy(self):
         """ML validator proxy: reject if confidence below threshold."""
         score = self.ml_confidence_proxy()
-        cfg = self.per_coin_config
-        ml_min = cfg.get('ml_min', 40)
+        ml_min = self.hp.get('ml_min_confidence', 40)
         return score >= ml_min
 
     def should_long(self) -> bool:
-        """Entry logic mirroring Perrobotillo's execute_long → ML validator approval."""
+        """Entry logic mirroring Perrobotillo's execute_long -> ML validator approval."""
         coin = self.coin
 
         if not self.is_coin_enabled(coin):
@@ -381,8 +381,7 @@ class perrobotillo(Strategy):
 
         # ML validator proxy
         score = self.ml_confidence_proxy()
-        cfg = self.per_coin_config
-        ml_min = cfg.get('ml_min', 40)
+        ml_min = self.hp.get('ml_min_confidence', 40)
 
         if score < ml_min:
             return False
@@ -415,10 +414,9 @@ class perrobotillo(Strategy):
         Sets TP1 (35%), TP2 (30%), TP3 (30%), and SL.
         For spot trading, TPs and SL go in on_open_position(), not go_long().
         """
-        cfg = self.per_coin_config
         entry_price = self.price
         balance = self.balance
-        position_percent = cfg['pos']
+        position_percent = self.hp.get('position_size_percent', 10.0)
 
         # Calculate order value and quantity
         order_value = balance * (position_percent / 100)
@@ -429,17 +427,16 @@ class perrobotillo(Strategy):
 
     def on_open_position(self, order):
         """Set TP/SL after position is opened (spot trading requirement)."""
-        cfg = self.per_coin_config
         entry_price = self.average_entry_price
         qty = self.position.qty
 
-        # TP levels
-        tp1_price = entry_price * (1 + cfg['tp1'] / 100)
-        tp2_price = entry_price * (1 + cfg['tp2'] / 100)
-        tp3_price = entry_price * (1 + cfg['tp3'] / 100)
+        # TP levels (from hyperparameters for Optuna optimization)
+        tp1_price = entry_price * (1 + self.hp.get('tp1_percent', 3.0) / 100)
+        tp2_price = entry_price * (1 + self.hp.get('tp2_percent', 6.0) / 100)
+        tp3_price = entry_price * (1 + self.hp.get('tp3_percent', 9.0) / 100)
 
         # Stop loss
-        sl_price = entry_price * (1 - cfg['sl'] / 100)
+        sl_price = entry_price * (1 - self.hp.get('stop_loss_percent', 3.5) / 100)
 
         # Partial take profits: 35% / 30% / 30%
         qty_tp1 = qty * TP1_PCT
@@ -481,12 +478,13 @@ class perrobotillo(Strategy):
         """Hyperparameters para Optuna optimization."""
         return [
             {'name': 'tp1_percent', 'type': float, 'min': 1.0, 'max': 10.0, 'default': 3.0},
-            {'name': 'tp2_percent', 'type': float, 'min': 2.0, 'max': 15.0, 'default': 6.0},
-            {'name': 'tp3_percent', 'type': float, 'min': 3.0, 'max': 20.0, 'default': 9.0},
-            {'name': 'stop_loss_percent', 'type': float, 'min': 2.0, 'max': 8.0, 'default': 3.5},
-            {'name': 'position_size_percent', 'type': float, 'min': 5.0, 'max': 30.0, 'default': 10.0},
-            {'name': 'ema_fast', 'type': int, 'min': 5, 'max': 50, 'default': 20},
-            {'name': 'ema_slow', 'type': int, 'min': 20, 'max': 200, 'default': 50},
+            {'name': 'tp2_percent', 'type': float, 'min': 2.0, 'max': 15.0, 'default': 14.4},
+            {'name': 'tp3_percent', 'type': float, 'min': 3.0, 'max': 20.0, 'default': 18.2},
+            {'name': 'stop_loss_percent', 'type': float, 'min': 1.0, 'max': 10.0, 'default': 7.2},
+            {'name': 'position_size_percent', 'type': float, 'min': 5.0, 'max': 30.0, 'default': 18.0},
+            {'name': 'ml_min_confidence', 'type': float, 'min': 40.0, 'max': 90.0, 'default': 55.0},
+            {'name': 'ema_fast', 'type': int, 'min': 5, 'max': 50, 'default': 12},
+            {'name': 'ema_slow', 'type': int, 'min': 20, 'max': 200, 'default': 140},
             {'name': 'rsi_overbought', 'type': int, 'min': 60, 'max': 85, 'default': 75},
             {'name': 'rsi_oversold', 'type': int, 'min': 15, 'max': 45, 'default': 30},
             {'name': 'min_adx', 'type': int, 'min': 15, 'max': 40, 'default': 20},
