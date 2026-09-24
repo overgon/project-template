@@ -35,3 +35,7 @@ config.py
 live-config.py
 routes.py
 .env
+*.csv
+trade-history.json
+backtest_results.json
+docker/postgres-data/
