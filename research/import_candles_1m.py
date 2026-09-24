@@ -109,14 +109,20 @@ def verify_candles():
     """Verify stored candles by retrieving 1h data."""
     print("\n=== VERIFICATION ===")
     
-    end_ts = int(time.time() * 1000)
-    start_ts = end_ts - (90 * 24 * 60 * 60 * 1000)  # 90 days ago
+    # Use actual Perrobotillo data date range (Jan 18 - Apr 18, 2026)
+    start_ts = int(datetime.datetime(2026, 1, 18).timestamp() * 1000)
+    end_ts = int(datetime.datetime(2026, 4, 18, 18).timestamp() * 1000)
     
     all_good = True
     for coin in COINS:
         symbol = f'{coin}-USDT'
         try:
-            c = get_candles('Binance Spot', symbol, '1h', start_ts, end_ts)
+            result = get_candles('Binance Spot', symbol, '1h', start_ts, end_ts)
+            # get_candles returns (candles, metadata) — extract candles
+            if isinstance(result, tuple):
+                c = result[1] if result[0] is None else result[0]
+            else:
+                c = result
             if c is not None and len(c) > 0:
                 ts = c[0][0]
                 if ts > 1e12: ts = ts / 1000
@@ -141,25 +147,30 @@ def verify_ohlc_accuracy():
     """Verify that resampled 1h candles match the original Perrobotillo data."""
     print("\n=== OHLC Accuracy Check ===")
     
-    end_ts = int(time.time() * 1000)
-    start_ts = end_ts - (90 * 24 * 60 * 60 * 1000)
+    # Use actual Perrobotillo data date range (Jan 18 - Apr 18, 2026)
+    start_ts = int(datetime.datetime(2026, 1, 18).timestamp() * 1000)
+    end_ts = int(datetime.datetime(2026, 4, 18, 18).timestamp() * 1000)
     
     # Check BTC first candle
     csv_path = f'{RAW_DATA}/BTCUSDT_1h_90days.csv'
     df = pd.read_csv(csv_path)
     original_first = df.iloc[0]
     
-    c = get_candles('Binance Spot', 'BTC-USDT', '1h', start_ts, end_ts)
+    result = get_candles('Binance Spot', 'BTC-USDT', '1h', start_ts, end_ts)
+    if isinstance(result, tuple):
+        c = result[1] if result[0] is None else result[0]
+    else:
+        c = result
     
     if c is not None and len(c) > 0:
         # Compare first candle
         jesse_first = c[0]
         print(f'  Original 1h first candle:')
-        print(f'    Open:  {original_first["open"]}  vs  James: {jesse_first[1]:.4f}')
-        print(f'    High:  {original_first["high"]}  vs  James: {jesse_first[2]:.4f}')
-        print(f'    Low:   {original_first["low"]}   vs  James: {jesse_first[3]:.4f}')
-        print(f'    Close: {original_first["close"]}  vs  James: {jesse_first[4]:.4f}')
-        print(f'    Volume: {original_first["volume"]}  vs  James: {jesse_first[5]:.4f}')
+        print(f'    Open:  {original_first["open"]}  vs  Jesse: {jesse_first[1]:.4f}')
+        print(f'    High:  {original_first["high"]}  vs  Jesse: {jesse_first[2]:.4f}')
+        print(f'    Low:   {original_first["low"]}   vs  Jesse: {jesse_first[3]:.4f}')
+        print(f'    Close: {original_first["close"]}  vs  Jesse: {jesse_first[4]:.4f}')
+        print(f'    Volume: {original_first["volume"]}  vs  Jesse: {jesse_first[5]:.4f}')
         
         # Check if values match (within rounding)
         tol = 0.01  # small tolerance for floating point
