@@ -62,6 +62,10 @@ def expand_1h_to_1m(df):
             
             rows.append([minute_ts, m_open, high, low, m_close, vol_per_min])
     
+    # Ensure chronological order (Bug fix per issue #44)
+    # If CSV rows are non-sequential, expansion produces out-of-order 1m candles
+    rows.sort(key=lambda r: r[0])
+    
     return np.array(rows, dtype=np.float64)
 
 def load_perrobotillo_csv(filepath):
