@@ -261,9 +261,27 @@ def gather_data(coin: str):
     hyperparameters['ema_fast'] = 5
     hyperparameters['ema_slow'] = 20
 
-    # Patch router._reset so strategy._ml_data_points survives the backtest
+    # Patch router._reset to preserve _ml_data_points during cleanup.
+    # Issue #44: run_backtest() internally calls _reset_research_runtime_state()
+    # TWICE: once BEFORE execution (line 160, sets up routes) and once AFTER
+    # (line 182, in finally — clears routes + _ml_data_points).
+    # A no-op patch (router._reset = lambda: None) blocks BOTH calls,
+    # preventing route setup for the 2nd+ coin → only 51 samples.
+    # FIX: intercept _reset, save _ml_data_points to a buffer, THEN call
+    # original reset (which re-configures routes for the next coin).
+    saved_ml_data = []
     original_router_reset = router._reset
-    router._reset = lambda: None
+
+    def patched_reset():
+        # Save strategy._ml_data_points before original reset clears them
+        if router.routes:
+            s = router.routes[0].strategy
+            if hasattr(s, "_ml_data_points"):
+                saved_ml_data.clear()
+                saved_ml_data.extend(s._ml_data_points)
+        original_router_reset()
+
+    router._reset = patched_reset
 
     data_points = []
     backtest_result = None
@@ -275,12 +293,20 @@ def gather_data(coin: str):
             hyperparameters=hyperparameters, fast_mode=True,
         )
 
-        # Collect _ml_data_points while router still has the strategy instance
+        # Collect _ml_data_points: prefer live strategy reference (1st coin),
+        # fall back to saved_ml_data buffer (2nd+ coin — router was reset by
+        # _isolated_backtest's finally block which we patched to save first).
+        data_points = []
         if router.routes:
             strategy = router.routes[0].strategy
             if hasattr(strategy, "_ml_data_points"):
                 data_points = [p for p in strategy._ml_data_points
                               if p.get("label") is not None]
+        elif saved_ml_data:
+            data_points = [p for p in saved_ml_data
+                          if p.get("label") is not None]
+            strategy = None
+        if strategy is not None:
             try:
                 # export_ml_data expects a DIRECTORY, not a file path
                 # It creates <directory>/ml_data/<coin>_data.csv internally

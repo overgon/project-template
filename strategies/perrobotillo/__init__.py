@@ -458,8 +458,12 @@ class perrobotillo(Strategy):
         self.stop_loss = qty, sl_price
 
     def on_close_position(self, order, closed_trade):
-        """Record ML label when position closes (Fase 5 data gathering)."""
-        if self.ml_mode == "gather":
+        """Record trade-level label in gather mode.
+
+        If after() already consumed the current data point (it has a
+        price_direction label), this is a no-op — no warning.
+        """
+        if self.ml_mode == "gather" and self._current_ml_point is not None:
             self.record_label('is_profitable', closed_trade.pnl > 0)
 
     def go_short(self):
