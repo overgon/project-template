@@ -39,3 +39,15 @@ routes.py
 trade-history.json
 backtest_results.json
 docker/postgres-data/
+
+# Fase 5 ML pipeline artifacts (generated, not source)
+fase5_models/*/  *.pkl
+analysis_fase5/fase5_summary.json
+analysis_fase5/*/
+fase5_fullrun.log
+issue44_comment.md
+check_imports.py
+check_imports2.py
+fix_imports.py
+fix_imports2.py
+docker/docker-compose.override.yml.bak

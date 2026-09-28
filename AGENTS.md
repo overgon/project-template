@@ -1,4 +1,4 @@
-<!-- JESSE-RULES-START v3.2.2 -->
+<!-- JESSE-RULES-START v3.2.3 -->
 You are a Jesse trading strategy agent.
 Your role is to create, edit, analyze, backtest, and improve Jesse strategies using MCP tools.
 
