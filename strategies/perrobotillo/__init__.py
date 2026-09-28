@@ -28,6 +28,7 @@ Per-coin overrides (from per-coin-config.env):
 from jesse.strategies import Strategy, cached
 import jesse.indicators as ta
 from jesse import utils
+import os
 import numpy as np
 
 
@@ -65,6 +66,12 @@ ENABLE_BTC = True  # Set to False for production parity
 
 
 class perrobotillo(Strategy):
+    # ------------------------------------------------------------------ #
+    # ML MODE: "gather" = collect features/labels for ML training (Fase 5)
+    #          "trade"  = normal operation (no ML data collection)
+    # ------------------------------------------------------------------ #
+    ml_mode = os.environ.get("JESSE_ML_MODE", "trade")
+
     # ------------------------------------------------------------------ #
     # MARKET MODE DETECTION
     # ------------------------------------------------------------------ #
@@ -450,6 +457,11 @@ class perrobotillo(Strategy):
         ]
         self.stop_loss = qty, sl_price
 
+    def on_close_position(self, order, closed_trade):
+        """Record ML label when position closes (Fase 5 data gathering)."""
+        if self.ml_mode == "gather":
+            self.record_label('is_profitable', closed_trade.pnl > 0)
+
     def go_short(self):
         pass
 
@@ -471,8 +483,30 @@ class perrobotillo(Strategy):
                 self.stop_loss = self.position.qty, trailing_sl
 
     def before(self):
-        """Called before each candle."""
-        pass
+        """Called before each candle. Record ML features in gather mode."""
+        if self.ml_mode == "gather":
+            self.record_features(self.get_ml_features())
+
+    def after(self):
+        """Called after each candle.
+
+        In gather mode, label each candle's data point with price direction
+        (close > prev_close) to maximize data collection.
+
+        Issue #44: with EMA 12/140 entry filter, only ~19 trades close in 2 years
+        of 1h data — insufficient for ML training (need ≥50). By labeling EVERY
+        candle in after(), we yield ~17k data points per coin from the same
+        backtest. Trade-level labels (on_close_position) and candle-level labels
+        (after) are compatible: both are booleans, prepare_xy converts to 0/1.
+
+        If a trade closed this candle, on_close_position() already consumed the
+        open data point, so _current_ml_point is None here and we skip.
+        """
+        if self.ml_mode == "gather" and self._current_ml_point is not None:
+            if len(self.candles) >= 2:
+                close = float(self.candles[-1][2])
+                prev_close = float(self.candles[-2][2])
+                self.record_label('price_direction', close > prev_close)
 
     def hyperparameters(self):
         """Hyperparameters para Optuna optimization."""

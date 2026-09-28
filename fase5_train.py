@@ -39,8 +39,8 @@ from xgboost import XGBClassifier
 
 # Jesse research imports
 sys.path.insert(0, '/home')
-from jessie.research.backtest import backtest as run_backtest, _reset_research_runtime_state  # noqa: E402
-from jessie.routes import router  # noqa: E402
+from jesse.research.backtest import backtest as run_backtest, _reset_research_runtime_state  # noqa: E402
+from jesse.routes import router  # noqa: E402
 
 warnings.filterwarnings("ignore")
 
@@ -212,8 +212,30 @@ def gather_data(coin: str):
     config, routes, data_routes, candles, warmup = build_gather_input(coin)
     csv_path = str(OUTPUT_DIR / f"{coin}_ml_data.csv")
 
-    # Build custom hyperparameters from COIN_CONFIGS (lower ml_min → more trades)
+    # Build custom hyperparameters as a DICT (not a list).
+    # Issue #44: passing a list causes `r.strategy.hp = route_hp` (backtest_mode.py
+    # L1363) to set self.hp to a list → TypeError: list indices must be integers
+    # when the strategy accesses self.hp['ema_fast'].
+    # Also, the dict must include ALL hyperparameters (ema_fast, ema_slow, etc.)
+    # because the strategy uses self.hp['ema_fast'] (not .get()) at lines 233/237.
     cfg = COIN_CONFIGS.get(coin, {})
+
+    # Full default set matching Strategy.hyperparameters() defaults
+    hyperparameters = {
+        'tp1_percent': 3.0,
+        'tp2_percent': 14.4,
+        'tp3_percent': 18.2,
+        'stop_loss_percent': 7.2,
+        'position_size_percent': 18.0,
+        'ml_min_confidence': 40,
+        'ema_fast': 12,
+        'ema_slow': 140,
+        'rsi_overbought': 75,
+        'rsi_oversold': 30,
+        'min_adx': 20,
+    }
+
+    # Override with per-coin config from COIN_CONFIGS
     param_map = {
         'ml_min': 'ml_min_confidence',
         'tp1': 'tp1_percent',
@@ -222,11 +244,22 @@ def gather_data(coin: str):
         'sl': 'stop_loss_percent',
         'pos': 'position_size_percent',
     }
-    hyperparameters = [
-        {'name': hp_name, 'value': cfg[cfg_key]}
-        for cfg_key, hp_name in param_map.items()
-        if cfg_key in cfg
-    ]
+    for cfg_key, hp_name in param_map.items():
+        if cfg_key in cfg:
+            hyperparameters[hp_name] = cfg[cfg_key]
+
+    # Lower ml_min_confidence during data gathering to collect more samples.
+    # Issue #44: with ml_min=35 (LINK), only 19 data points collected (need ≥50).
+    # We WANT all trades that meet basic EMA/price criteria → label them for ML.
+    hyperparameters['ml_min_confidence'] = 0
+
+    # Lower EMA thresholds during data gathering to generate more entry signals.
+    # Issue #44: EMA 12/140 produces only ~19 trades in 2 years — insufficient
+    # for ML training (need ≥50). EMA 5/20 generates more crosses.
+    # Features still use hardcoded EMA 12/26 (líneas 547-548), so this only
+    # affects the entry filter, NOT the recorded ML features.
+    hyperparameters['ema_fast'] = 5
+    hyperparameters['ema_slow'] = 20
 
     # Patch router._reset so strategy._ml_data_points survives the backtest
     original_router_reset = router._reset
@@ -249,7 +282,9 @@ def gather_data(coin: str):
                 data_points = [p for p in strategy._ml_data_points
                               if p.get("label") is not None]
             try:
-                strategy.export_ml_data(csv_path)
+                # export_ml_data expects a DIRECTORY, not a file path
+                # It creates <directory>/ml_data/<coin>_data.csv internally
+                strategy.export_ml_data(str(OUTPUT_DIR))
             except Exception:
                 pass
     finally:
